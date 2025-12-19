@@ -278,7 +278,7 @@ app.post("/api/tools/run", async (req, res) => {
 // --- OpenAI / Streamable HTTP Transport ---
 // This is the endpoint OpenAI will connect to (e.g. https://.../mcp)
 
-app.post("/mcp", async (req, res) => {
+app.all("/mcp", async (req, res) => { // Use app.all to handle GET, POST, OPTIONS
     // OpenAI Stateless Transport
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Stateless
@@ -293,11 +293,6 @@ app.post("/mcp", async (req, res) => {
         console.error("MCP Error:", error);
         if (!res.headersSent) res.status(500).send("Internal Server Error");
     }
-});
-
-app.get("/mcp", (req, res) => {
-    // Health check or simple verify
-    res.send("Chess MCP Server Active");
 });
 
 // --- SSE Transport (Standard MCP Clients like Claude Desktop) ---
