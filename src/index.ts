@@ -226,7 +226,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // --- Express Server Setup ---
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: '*', // Allow n8n to connect from anywhere
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Optional: Simple HTTP endpoints for tools (easier for basic n8n nodes)
 app.use(express.json());
@@ -242,21 +246,36 @@ app.get("/api/board", (req, res) => {
 let transport: SSEServerTransport | null = null;
 
 app.get("/sse", async (req, res) => {
-  console.log("New SSE connection established");
+  console.log("New SSE connection initiated");
+  
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
   
-  // Keep connection open
+  // Heartbeat to keep connection alive for n8n
+  const interval = setInterval(() => {
+      if (!res.writableEnded) {
+          res.write(":\n\n"); // SSE comment/keep-alive
+      }
+  }, 15000);
+
   req.on("close", () => {
     console.log("SSE connection closed");
-    // Clean up if necessary
+    clearInterval(interval);
+    server.close(); 
   });
 });
 
 app.post("/messages", async (req, res) => {
+  console.log("Received message on /messages");
   if (transport) {
-    await transport.handlePostMessage(req, res);
+    try {
+        await transport.handlePostMessage(req, res);
+    } catch (e) {
+        console.error("Error handling message:", e);
+        res.status(500).send("Internal Server Error");
+    }
   } else {
+    console.warn("No active transport found for message");
     res.status(400).send("No active transport");
   }
 });
