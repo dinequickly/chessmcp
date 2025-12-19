@@ -270,6 +270,7 @@ app.post("/api/tools/run", async (req, res) => {
                 try {
                      const moveResult = chess.move(move);
                      if (!moveResult) throw new Error(`Invalid move: ${move}`);
+                     console.log(`User move applied. New FEN: ${chess.fen()}`); // Log new FEN
                      result = { 
                          content: `Move ${move} played. \n${chess.ascii()}` 
                      };
@@ -296,6 +297,7 @@ app.post("/api/tools/run", async (req, res) => {
                 if (!bestMove) throw new Error("No move from Stockfish");
                 
                 chess.move(bestMove);
+                console.log(`Stockfish move applied. New FEN: ${chess.fen()}`); // Log new FEN
                 result = { 
                     content: `Stockfish played ${bestMove}. \nEval: ${response.data.eval}` 
                 };
@@ -304,6 +306,7 @@ app.post("/api/tools/run", async (req, res) => {
 
             case "new_game": {
                 chess.reset();
+                console.log(`New game started. FEN: ${chess.fen()}`); // Log new FEN
                 result = { content: "Game reset." };
                 break;
             }
