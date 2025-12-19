@@ -1,9 +1,55 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Chessboard } from 'react-chessboard';
+import { Chess } from 'chess.js'; // Needed for custom renderer logic
 import { Send, User, Bot, RefreshCw } from 'lucide-react';
 import { clsx } from 'clsx';
+
+// Custom Read-Only Board Component
+function BoardView({ fen }: { fen: string }) {
+  // Use chess.js logic to parse the FEN into a grid
+  // If fen is "start", create new game (default start pos). Else load fen.
+  const game = fen === "start" ? new Chess() : new Chess(fen);
+  const board = game.board(); // 8x8 array of { type: 'p', color: 'w' } | null
+
+  return (
+    <div className="grid grid-cols-8 grid-rows-8 w-full h-full border-4 border-neutral-800 bg-neutral-800">
+      {board.map((row, rowIndex) =>
+        row.map((piece, colIndex) => {
+          const isDark = (rowIndex + colIndex) % 2 === 1;
+          const squareColor = isDark ? "bg-[#779556]" : "bg-[#ebecd0]"; // Standard chess.com colors
+          
+          return (
+            <div 
+              key={`${rowIndex}-${colIndex}`} 
+              className={`${squareColor} flex items-center justify-center relative select-none w-full h-full`}
+            >
+              {piece && (
+                <img 
+                  // Using High-Res Wikimedia images or reliable CDN
+                  src={`https://images.chesscomfiles.com/chess-themes/pieces/neo/150/${piece.color}${piece.type}.png`}
+                  alt={`${piece.color}${piece.type}`}
+                  className="w-[90%] h-[90%] object-contain drop-shadow-md"
+                />
+              )}
+               {/* Coordinate labels for readability */}
+               {colIndex === 0 && (
+                 <span className={`absolute top-0.5 left-0.5 text-[10px] font-bold ${isDark ? "text-[#ebecd0]" : "text-[#779556]"}`}>
+                   {8 - rowIndex}
+                 </span>
+               )}
+               {rowIndex === 7 && (
+                 <span className={`absolute bottom-0 right-1 text-[10px] font-bold ${isDark ? "text-[#ebecd0]" : "text-[#779556]"}`}>
+                   {String.fromCharCode(97 + colIndex)}
+                 </span>
+               )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
 
 interface Message {
   id: string;
@@ -26,12 +72,17 @@ export default function ChessGame() {
   useEffect(() => {
     const fetchBoard = async () => {
       try {
-        const res = await fetch(`${apiUrl}/api/board`);
+        // Add timestamp to prevent caching
+        const res = await fetch(`${apiUrl}/api/board?t=${Date.now()}`);
         if (!res.ok) throw new Error("Network response was not ok");
         
         const data = await res.json();
+        console.log("Fetched Board State:", data); // Debug log
+        
         if (data.fen) {
-          setFen(data.fen);
+          const cleanFen = data.fen.trim();
+          // Force update even if string is "same" conceptually but we want a redraw (though React won't redraw if identical primitive)
+          setFen(cleanFen);
           setTurn(data.turn);
           setConnectionStatus("connected");
         }
@@ -78,6 +129,8 @@ export default function ChessGame() {
       if (contentType && contentType.includes("application/json")) {
          const data = await response.json();
          // Assuming n8n returns { output: "..." } or similar. Adjust based on actual n8n workflow.
+         // If it returns array of objects, or just a string property.
+         // Defaulting to dumping the JSON if unknown structure, or looking for common keys.
          responseText = data.output || data.message || data.text || JSON.stringify(data);
       } else {
          responseText = await response.text();
@@ -123,14 +176,40 @@ export default function ChessGame() {
                 onChange={(e) => setApiUrl(e.target.value)}
                 placeholder="https://your-railway-app.app"
             />
+            
+            <button
+                onClick={async () => {
+                    try {
+                        const res = await fetch(`${apiUrl}/api/tools/run`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ name: "new_game", args: {} })
+                        });
+                        if (res.ok) {
+                            // Fetch immediately to update UI
+                            const boardRes = await fetch(`${apiUrl}/api/board?t=${Date.now()}`);
+                            const data = await boardRes.json();
+                            if (data.fen) setFen(data.fen);
+                        }
+                    } catch (e) {
+                        console.error("Reset failed", e);
+                    }
+                }}
+                className="flex items-center justify-center gap-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs px-2 py-1 rounded border border-neutral-700 transition-colors w-full"
+            >
+                <RefreshCw size={12} /> Reset Board
+            </button>
         </div>
 
         <div className="w-full max-w-[600px] aspect-square shadow-2xl rounded-lg overflow-hidden border border-neutral-800 pointer-events-none">
-           {/* Pointer events none to prevent moving pieces locally since it's a view */}
-          <Chessboard position={fen} boardOrientation="white" {...({} as any)} />
+           {/* Replace react-chessboard with our custom view */}
+           <BoardView fen={fen} />
         </div>
 
         <div className="mt-4 flex flex-col items-center gap-2">
+           <div className="p-2 bg-black/50 text-[10px] font-mono text-green-400 max-w-md break-all rounded">
+              DEBUG FEN: {fen}
+           </div>
            <div className="flex items-center gap-2 text-neutral-400">
              <div className={clsx("w-3 h-3 rounded-full", turn === 'w' ? "bg-white" : "bg-neutral-800 border border-white")}></div>
              <span>{turn === 'w' ? "White" : "Black"}'s Turn</span>
