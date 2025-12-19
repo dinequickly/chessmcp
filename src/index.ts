@@ -276,21 +276,141 @@ app.post("/api/tools/run", async (req, res) => {
 });
 
 // --- OpenAI / Streamable HTTP Transport ---
-// This is the endpoint OpenAI will connect to (e.g. https://.../mcp)
 
-app.all("/mcp", async (req, res) => { // Use app.all to handle GET, POST, OPTIONS
-    // OpenAI Stateless Transport
+// Factory function to create a fresh server instance for every request (Stateless Mode)
+function createChessServer() {
+    // Re-instantiate the server for this request
+    const srv = new Server(
+      { name: "mcp-chess-server", version: "1.0.0" },
+      { capabilities: { resources: {}, tools: {} } }
+    );
+
+    // Register Resources
+    srv.setRequestHandler(ListResourcesRequestSchema, async () => ({
+        resources: [
+            { uri: "chess://board", name: "Current Chess Board", mimeType: "text/plain" },
+            { uri: "ui://widget/chess.html", name: "Chess Widget", mimeType: "text/html" }
+        ]
+    }));
+
+    srv.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        if (request.params.uri === "chess://board") {
+            return { contents: [{ uri: "chess://board", mimeType: "text/plain", text: chess.ascii() + "\n\nFEN: " + chess.fen() }] };
+        }
+        if (request.params.uri === "ui://widget/chess.html") {
+            return { contents: [{ uri: "ui://widget/chess.html", mimeType: "text/html", text: widgetHtml }] };
+        }
+        throw new McpError(ErrorCode.InvalidRequest, "Resource not found");
+    });
+
+    // Register Tools
+    srv.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: [
+            {
+                name: "move_piece",
+                description: "Make a move on the chess board.",
+                inputSchema: {
+                    type: "object",
+                    properties: { move: { type: "string" } },
+                    required: ["move"]
+                },
+                // @ts-ignore
+                _meta: {
+                    "openai/outputTemplate": "ui://widget/chess.html",
+                    "openai/toolInvocation/invoking": "Making move...",
+                    "openai/toolInvocation/invoked": "Move made",
+                }
+            },
+            {
+                name: "get_stockfish_move",
+                description: "Ask Stockfish to move.",
+                inputSchema: { type: "object", properties: {} },
+                // @ts-ignore
+                _meta: {
+                    "openai/outputTemplate": "ui://widget/chess.html",
+                    "openai/toolInvocation/invoking": "Thinking...",
+                    "openai/toolInvocation/invoked": "Stockfish moved",
+                }
+            },
+            {
+                name: "new_game",
+                description: "Reset board.",
+                inputSchema: { type: "object", properties: {} },
+                // @ts-ignore
+                _meta: {
+                     "openai/outputTemplate": "ui://widget/chess.html",
+                     "openai/toolInvocation/invoking": "Resetting...",
+                     "openai/toolInvocation/invoked": "Reset",
+                }
+            }
+        ]
+    }));
+
+    // Register Call Tool Logic
+    srv.setRequestHandler(CallToolRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        const makeResponse = (text: string, isError = false) => ({
+            content: [{ type: "text", text: text }],
+            isError,
+            // @ts-ignore
+            structuredContent: { fen: chess.fen(), ascii: chess.ascii(), lastMove: text }
+        });
+
+        if (name === "move_piece") {
+            try {
+                // @ts-ignore
+                const m = args.move as string;
+                if (!chess.move(m)) throw new Error("Invalid move");
+                return makeResponse(`Moved ${m}`);
+            } catch (e: any) { return makeResponse(e.message, true); }
+        }
+        if (name === "get_stockfish_move") {
+             if (chess.isGameOver()) return makeResponse("Game Over");
+             const response = await axios.post("https://chess-api.com/v1", { fen: chess.fen(), depth: 10 });
+             chess.move(response.data.move);
+             return makeResponse(`Stockfish: ${response.data.move}`);
+        }
+        if (name === "new_game") {
+            chess.reset();
+            return makeResponse("Reset.");
+        }
+        throw new McpError(ErrorCode.MethodNotFound, `Tool ${name} not found`);
+    });
+
+    return srv;
+}
+
+app.all("/mcp", async (req, res) => {
+    // 1. Set Critical Headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+    res.setHeader("Access-Control-Allow-Headers", "content-type, mcp-session-id");
+    
+    // 2. Handle Options
+    if (req.method === "OPTIONS") {
+        res.status(204).end();
+        return;
+    }
+
+    // 3. Create Fresh Server & Transport per Request (Stateless Pattern)
+    const serverInstance = createChessServer();
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Stateless
-        enableJsonResponse: true
+        enableJsonResponse: true,
     });
-    
+
+    // 4. Cleanup
+    res.on("close", () => {
+        transport.close();
+        serverInstance.close();
+    });
+
+    // 5. Connect and Handle
     try {
-        await server.connect(transport);
+        await serverInstance.connect(transport);
         await transport.handleRequest(req, res);
-        // Note: Transport closes itself after request handling in stateless mode
     } catch (error) {
-        console.error("MCP Error:", error);
+        console.error("MCP Request Error:", error);
         if (!res.headersSent) res.status(500).send("Internal Server Error");
     }
 });
