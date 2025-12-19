@@ -17,6 +17,8 @@ export default function ChessGame() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [apiUrl, setApiUrl] = useState("https://chessmcp-production.up.railway.app");
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "checking">("checking");
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,21 +26,25 @@ export default function ChessGame() {
   useEffect(() => {
     const fetchBoard = async () => {
       try {
-        const res = await fetch("https://chessmcp-production.up.railway.app/api/board");
+        const res = await fetch(`${apiUrl}/api/board`);
+        if (!res.ok) throw new Error("Network response was not ok");
+        
         const data = await res.json();
         if (data.fen) {
           setFen(data.fen);
           setTurn(data.turn);
+          setConnectionStatus("connected");
         }
       } catch (e) {
         console.error("Failed to fetch board:", e);
+        setConnectionStatus("disconnected");
       }
     };
 
-    fetchBoard();
+    fetchBoard(); // Initial fetch
     const interval = setInterval(fetchBoard, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [apiUrl]);
 
   // Scroll to bottom of chat
   useEffect(() => {
@@ -72,8 +78,6 @@ export default function ChessGame() {
       if (contentType && contentType.includes("application/json")) {
          const data = await response.json();
          // Assuming n8n returns { output: "..." } or similar. Adjust based on actual n8n workflow.
-         // If it returns array of objects, or just a string property.
-         // Defaulting to dumping the JSON if unknown structure, or looking for common keys.
          responseText = data.output || data.message || data.text || JSON.stringify(data);
       } else {
          responseText = await response.text();
@@ -103,8 +107,22 @@ export default function ChessGame() {
       
       {/* Left: Chess Board Area (Read Only View) */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 bg-neutral-950/50 relative">
-        <div className="absolute top-4 left-4 text-neutral-500 text-xs font-mono">
-            Connected to: chessmcp-production.up.railway.app
+        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+                <div className={clsx("w-2 h-2 rounded-full", 
+                    connectionStatus === "connected" ? "bg-green-500" : "bg-red-500 animate-pulse"
+                )}></div>
+                <span className="text-neutral-500 text-xs font-mono">
+                    {connectionStatus === "connected" ? "Connected" : "Disconnected"}
+                </span>
+            </div>
+            
+            <input 
+                className="bg-neutral-800 border border-neutral-700 text-xs text-neutral-300 px-2 py-1 rounded w-64 focus:outline-none focus:border-purple-500"
+                value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)}
+                placeholder="https://your-railway-app.app"
+            />
         </div>
 
         <div className="w-full max-w-[600px] aspect-square shadow-2xl rounded-lg overflow-hidden border border-neutral-800 pointer-events-none">
