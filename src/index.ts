@@ -243,6 +243,82 @@ app.get("/api/board", (req, res) => {
     });
 });
 
+/**
+ * DIRECT TOOL EXECUTION ENDPOINT (For easy n8n integration)
+ * Usage: POST /api/tools/run
+ * Body: { "name": "move_piece", "args": { "move": "e4" } }
+ */
+app.post("/api/tools/run", async (req, res) => {
+    const { name, args } = req.body;
+
+    // Reuse the existing tool logic by creating a mock request object
+    // We wrapped the tool logic in the MCP handler, so we need to extract it or call it.
+    // Since the logic is inside the `server.setRequestHandler`, it's hard to call directly.
+    // Let's refactor slightly to expose the logic or just copy/paste the switch case for this endpoint 
+    // to ensure 100% stability without messing with the MCP internals.
+    
+    try {
+        let result;
+        
+        switch (name) {
+            case "move_piece": {
+                const schema = z.object({ move: z.string() });
+                const parsed = schema.safeParse(args);
+                if (!parsed.success) throw new Error("Invalid arguments: move is required");
+                const { move } = parsed.data;
+                
+                try {
+                     const moveResult = chess.move(move);
+                     if (!moveResult) throw new Error(`Invalid move: ${move}`);
+                     result = { 
+                         content: `Move ${move} played. \n${chess.ascii()}` 
+                     };
+                } catch (e: any) {
+                    // Try to handle ambiguity or illegal move errors from chess.js
+                     throw new Error(`Move failed: ${e.message}`);
+                }
+                break;
+            }
+
+            case "get_stockfish_move": {
+                 if (chess.isGameOver()) {
+                    result = { content: "Game Over" };
+                    break;
+                 }
+                 const currentFen = chess.fen();
+                 const response = await axios.post("https://chess-api.com/v1", {
+                    fen: currentFen,
+                    depth: 12,
+                    maxThinkingTime: 50
+                }, { headers: { "Content-Type": "application/json" } });
+
+                const bestMove = response.data.move;
+                if (!bestMove) throw new Error("No move from Stockfish");
+                
+                chess.move(bestMove);
+                result = { 
+                    content: `Stockfish played ${bestMove}. \nEval: ${response.data.eval}` 
+                };
+                break;
+            }
+
+            case "new_game": {
+                chess.reset();
+                result = { content: "Game reset." };
+                break;
+            }
+
+            default:
+                throw new Error(`Tool ${name} not found`);
+        }
+
+        res.json(result);
+
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
 let transport: SSEServerTransport | null = null;
 
 app.get("/sse", async (req, res) => {
