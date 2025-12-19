@@ -307,7 +307,14 @@ let sseTransport: SSEServerTransport | null = null;
 
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection");
-  sseTransport = new SSEServerTransport("/messages", res);
+  
+  // FIX: Use absolute URL for the messages endpoint so n8n knows exactly where to post
+  // This resolves the "hanging" issue where the client connects but doesn't know how to send commands.
+  const host = req.headers.host; 
+  const protocol = host?.includes("localhost") ? "http" : "https";
+  const endpoint = `${protocol}://${host}/messages`;
+  
+  sseTransport = new SSEServerTransport(endpoint, res);
   await server.connect(sseTransport);
   
   const interval = setInterval(() => {
@@ -316,7 +323,6 @@ app.get("/sse", async (req, res) => {
 
   req.on("close", () => {
     clearInterval(interval);
-    // server.close(); // Don't close server, just transport? Server supports multiple transports.
   });
 });
 
