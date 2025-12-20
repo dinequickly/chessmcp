@@ -380,38 +380,46 @@ function createChessServer() {
     return srv;
 }
 
-app.all("/mcp", async (req, res) => {
-    // 1. Set Critical Headers
+// --- OpenAI / Streamable HTTP Transport ---
+
+// Handle Preflight OPTIONS
+app.options("/mcp", (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "content-type, mcp-session-id");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+    res.status(204).end();
+});
+
+// Handle GET (Health Check / Discovery)
+app.get("/mcp", (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send("Chess MCP Server Active");
+});
+
+// Handle POST (Actual MCP Traffic)
+app.post("/mcp", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
-    res.setHeader("Access-Control-Allow-Headers", "content-type, mcp-session-id");
     
-    // 2. Handle Options
-    if (req.method === "OPTIONS") {
-        res.status(204).end();
-        return;
-    }
-
-    // 3. Create Fresh Server & Transport per Request (Stateless Pattern)
+    // Create Fresh Server & Transport per Request (Stateless Pattern)
     const serverInstance = createChessServer();
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Stateless
         enableJsonResponse: true,
     });
 
-    // 4. Cleanup
-    res.on("close", () => {
-        transport.close();
-        serverInstance.close();
-    });
-
-    // 5. Connect and Handle
     try {
         await serverInstance.connect(transport);
         await transport.handleRequest(req, res);
     } catch (error) {
         console.error("MCP Request Error:", error);
         if (!res.headersSent) res.status(500).send("Internal Server Error");
+    } finally {
+        // Ensure cleanup happens after request is handled
+        // Note: transport.handleRequest usually manages the response stream closure
+        // We close the server instance to free resources
+        serverInstance.close(); 
     }
 });
 
