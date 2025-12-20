@@ -399,6 +399,7 @@ app.get("/mcp", (req, res) => {
 
 // Handle POST (Actual MCP Traffic)
 app.post("/mcp", async (req, res) => {
+    console.log("Received POST /mcp request"); // Debug log
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
     
