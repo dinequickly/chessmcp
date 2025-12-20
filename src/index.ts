@@ -378,23 +378,16 @@ function createChessServer() {
     return srv;
 }
 
-// Handle Preflight OPTIONS
-app.options("/mcp", (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "content-type, mcp-session-id");
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
-    res.status(204).end();
-});
-
 // Handle GET (Health Check / Discovery)
-app.get("/mcp", (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.send("Chess MCP Server Active");
-});
+// Removed explicit GET /mcp handler. app.post("/mcp") (which is now app.all) will handle GET requests via StreamableHTTPServerTransport.
+// app.get("/mcp", (req, res) => {
+//     res.setHeader("Access-Control-Allow-Origin", "*");
+//     res.send("Chess MCP Server Active");
+// });
 
 // Handle POST (Actual MCP Traffic)
 app.post("/mcp", async (req, res) => {
+    console.log("Received POST /mcp request"); // Debug log
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
     
@@ -439,7 +432,7 @@ app.get("/sse", async (req, res) => {
   });
 });
 
-app.post("/messages", async (req, res) => {
+app.post("/messages", express.json(), async (req, res) => { // Apply express.json() here
   if (!sseTransport) {
       res.status(400).send("No active transport");
       return;
