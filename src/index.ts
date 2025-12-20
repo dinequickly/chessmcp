@@ -379,11 +379,16 @@ function createChessServer() {
 }
 
 // Handle GET (Health Check / Discovery)
-// Removed explicit GET /mcp handler. app.post("/mcp") (which is now app.all) will handle GET requests via StreamableHTTPServerTransport.
-// app.get("/mcp", (req, res) => {
-//     res.setHeader("Access-Control-Allow-Origin", "*");
-//     res.send("Chess MCP Server Active");
-// });
+app.get("/mcp", (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.send("Chess MCP Server Active");
+});
+
+// OpenAI Domain Verification Endpoint
+app.get("/.well-known/openai-apps-challenge", (req, res) => {
+    res.setHeader("Content-Type", "text/plain");
+    res.send("dBk_khd9ye-ES-xhPdLFd_HTwvPKN_vKL4ejFSrqzEk");
+});
 
 // Handle POST (Actual MCP Traffic)
 app.post("/mcp", async (req, res) => {
