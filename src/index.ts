@@ -239,11 +239,11 @@ app.use(cors({
     exposedHeaders: ['Mcp-Session-Id'] // Critical for OpenAI
 }));
 
-// Optional: Simple HTTP endpoints for tools (easier for basic n8n nodes)
-app.use(express.json());
+// DO NOT use global express.json() as it consumes streams for MCP transports
+// app.use(express.json()); 
 
 app.get("/api/board", (req, res) => {
-    res.json({ 
+    res.json({
         fen: chess.fen(), 
         ascii: chess.ascii(), 
         turn: chess.turn() 
@@ -251,10 +251,9 @@ app.get("/api/board", (req, res) => {
 });
 
 // Reuse logic for direct API tool call (simplified for n8n/debug)
-app.post("/api/tools/run", async (req, res) => {
+// We need express.json() here specifically
+app.post("/api/tools/run", express.json(), async (req, res) => {
     const { name, args } = req.body;
-    // ... (Keep existing simple logic or call internal handler if possible, but keeping logic separate is safer for now)
-    // Simplified duplicate logic for the 'Simple Mode' endpoint
     try {
         let result;
         if (name === "move_piece") {
@@ -264,7 +263,6 @@ app.post("/api/tools/run", async (req, res) => {
             chess.reset();
             result = { content: "Reset" };
         } else if (name === "get_stockfish_move") {
-             // ... minimal logic
              const response = await axios.post("https://chess-api.com/v1", { fen: chess.fen() });
              chess.move(response.data.move);
              result = { content: `AI Moved ${response.data.move}` };
@@ -380,8 +378,6 @@ function createChessServer() {
     return srv;
 }
 
-// --- OpenAI / Streamable HTTP Transport ---
-
 // Handle Preflight OPTIONS
 app.options("/mcp", (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -394,11 +390,31 @@ app.options("/mcp", (req, res) => {
 // Handle GET (Health Check / Discovery)
 app.get("/mcp", (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    // Some clients probe with GET. Return 200 OK but maybe empty JSON to be safe?
-    res.json({ status: "active", transport: "http-post" });
+    res.send("Chess MCP Server Active");
 });
 
-// ... (POST /mcp stays same)
+// Handle POST (Actual MCP Traffic)
+app.post("/mcp", async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+    
+    // Create Fresh Server & Transport per Request (Stateless Pattern)
+    const serverInstance = createChessServer();
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined, // Stateless
+        enableJsonResponse: true,
+    });
+
+    try {
+        await serverInstance.connect(transport);
+        await transport.handleRequest(req, res);
+    } catch (error) {
+        console.error("MCP Request Error:", error);
+        if (!res.headersSent) res.status(500).send("Internal Server Error");
+    } finally {
+        serverInstance.close(); 
+    }
+});
 
 // --- SSE Transport ---
 
@@ -429,12 +445,6 @@ app.post("/messages", async (req, res) => {
       return;
   }
   
-  // SSEServerTransport.handlePostMessage expects the request object.
-  // Express might have already consumed the body if we use app.use(express.json()).
-  // The SDK usually handles req directly. 
-  // IF `req.body` is already parsed, we might need to be careful.
-  // The SDK checks `req.body` if available? 
-  // Let's pass the request directly.
   try {
       await sseTransport.handlePostMessage(req, res);
   } catch (e) {
