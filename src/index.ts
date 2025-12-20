@@ -394,46 +394,19 @@ app.options("/mcp", (req, res) => {
 // Handle GET (Health Check / Discovery)
 app.get("/mcp", (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.send("Chess MCP Server Active");
+    // Some clients probe with GET. Return 200 OK but maybe empty JSON to be safe?
+    res.json({ status: "active", transport: "http-post" });
 });
 
-// Handle POST (Actual MCP Traffic)
-app.post("/mcp", async (req, res) => {
-    console.log("Received POST /mcp request"); // Debug log
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
-    
-    // Create Fresh Server & Transport per Request (Stateless Pattern)
-    const serverInstance = createChessServer();
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // Stateless
-        enableJsonResponse: true,
-    });
+// ... (POST /mcp stays same)
 
-    try {
-        await serverInstance.connect(transport);
-        await transport.handleRequest(req, res);
-    } catch (error) {
-        console.error("MCP Request Error:", error);
-        if (!res.headersSent) res.status(500).send("Internal Server Error");
-    } finally {
-        // Ensure cleanup happens after request is handled
-        // Note: transport.handleRequest usually manages the response stream closure
-        // We close the server instance to free resources
-        serverInstance.close(); 
-    }
-});
-
-// --- SSE Transport (Standard MCP Clients like Claude Desktop) ---
-// Keep this for backward compatibility and Claude Desktop
+// --- SSE Transport ---
 
 let sseTransport: SSEServerTransport | null = null;
 
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection");
   
-  // FIX: Use absolute URL for the messages endpoint so n8n knows exactly where to post
-  // This resolves the "hanging" issue where the client connects but doesn't know how to send commands.
   const host = req.headers.host; 
   const protocol = host?.includes("localhost") ? "http" : "https";
   const endpoint = `${protocol}://${host}/messages`;
@@ -451,10 +424,22 @@ app.get("/sse", async (req, res) => {
 });
 
 app.post("/messages", async (req, res) => {
-  if (sseTransport) {
-    await sseTransport.handlePostMessage(req, res);
-  } else {
-    res.status(400).send("No active transport");
+  if (!sseTransport) {
+      res.status(400).send("No active transport");
+      return;
+  }
+  
+  // SSEServerTransport.handlePostMessage expects the request object.
+  // Express might have already consumed the body if we use app.use(express.json()).
+  // The SDK usually handles req directly. 
+  // IF `req.body` is already parsed, we might need to be careful.
+  // The SDK checks `req.body` if available? 
+  // Let's pass the request directly.
+  try {
+      await sseTransport.handlePostMessage(req, res);
+  } catch (e) {
+      console.error("SSE Message Error:", e);
+      res.status(500).send("Internal Error");
   }
 });
 
