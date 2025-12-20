@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+pillow
+torch
+numpy
+opencv-python
+matplotlib
+# git+https://github.com/facebookresearch/sam3.git
