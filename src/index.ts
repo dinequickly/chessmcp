@@ -22,8 +22,15 @@ import { fileURLToPath } from 'url';
  * MCP Server for playing Chess via HTTP/SSE and OpenAI Apps SDK.
  */
 
-// Global State (Note: In a production multi-user env, map this by session ID)
-let chess = new Chess();
+// Global State mapped by Session ID
+const games = new Map<string, Chess>();
+
+function getGame(sessionId: string): Chess {
+    if (!games.has(sessionId)) {
+        games.set(sessionId, new Chess());
+    }
+    return games.get(sessionId)!;
+}
 
 // Helper to get current directory in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -53,7 +60,9 @@ const server = new Server(
   }
 );
 
-// --- MCP Handlers ---
+// --- MCP Handlers (Global/Default Session for SSE/Debug) ---
+// Note: These handlers use a default session for simplicity if accessed directly via the global 'server' instance (e.g. SSE).
+// The per-request 'createChessServer' below handles the actual multi-tenant traffic.
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
@@ -76,6 +85,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
 });
 
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const chess = getGame("default");
   if (request.params.uri === "chess://board") {
     return {
       contents: [
@@ -94,8 +104,6 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
                   uri: "ui://widget/chess.html",
                   mimeType: "text/html",
                   text: widgetHtml,
-                  // OpenAI specific metadata to prefer borderless or specific display
-                  // _meta: { "openai/widgetPrefersBorder": true } 
               }
           ]
       }
@@ -120,7 +128,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["move"],
         },
         // OpenAI Metadata for Widget Interaction
-        // This tells OpenAI to show the widget when this tool is called/invoked
         // @ts-ignore
         _meta: {
             "openai/outputTemplate": "ui://widget/chess.html",
@@ -162,6 +169,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  const chess = getGame("default");
   
   // Helper to return format compatible with both standard MCP and OpenAI Widget
   const makeResponse = (text: string, isError = false) => {
@@ -243,6 +251,7 @@ app.use(cors({
 // app.use(express.json()); 
 
 app.get("/api/board", (req, res) => {
+    const chess = getGame("default");
     res.json({
         fen: chess.fen(), 
         ascii: chess.ascii(), 
@@ -254,6 +263,7 @@ app.get("/api/board", (req, res) => {
 // We need express.json() here specifically
 app.post("/api/tools/run", express.json(), async (req, res) => {
     const { name, args } = req.body;
+    const chess = getGame("default");
     try {
         let result;
         if (name === "move_piece") {
@@ -276,7 +286,9 @@ app.post("/api/tools/run", express.json(), async (req, res) => {
 // --- OpenAI / Streamable HTTP Transport ---
 
 // Factory function to create a fresh server instance for every request (Stateless Mode)
-function createChessServer() {
+function createChessServer(sessionId: string) {
+    const chess = getGame(sessionId);
+
     // Re-instantiate the server for this request
     const srv = new Server(
       { name: "mcp-chess-server", version: "1.0.0" },
@@ -392,12 +404,15 @@ app.get("/.well-known/openai-apps-challenge", (req, res) => {
 
 // Handle POST (Actual MCP Traffic)
 app.post("/mcp", async (req, res) => {
-    console.log("Received POST /mcp request"); // Debug log
+    // console.log("Received POST /mcp request"); // Debug log
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
     
+    // Extract Session ID from Headers (or default)
+    const sessionId = (req.headers["mcp-session-id"] as string) || "default";
+
     // Create Fresh Server & Transport per Request (Stateless Pattern)
-    const serverInstance = createChessServer();
+    const serverInstance = createChessServer(sessionId);
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Stateless
         enableJsonResponse: true,
