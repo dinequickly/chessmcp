@@ -51,16 +51,196 @@ function getGame(sessionId: string): Chess {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Read the widget HTML
-// Adjust path based on where built file runs. Assuming 'dist/index.js', we go up one level.
-const widgetPath = path.join(__dirname, '../public', 'chess-widget.html');
-let widgetHtml = "";
-try {
-    widgetHtml = fs.readFileSync(widgetPath, 'utf8');
-} catch (e) {
-    console.error("Could not read chess-widget.html from", widgetPath, e);
-    widgetHtml = "<h1>Error: Widget not found</h1>";
-}
+// Embedded Widget HTML to avoid runtime file read issues
+const widgetHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Chess Board</title>
+    <style>
+        :root {
+            --bg-dark: #779556;
+            --bg-light: #ebecd0;
+            --border-color: #262421;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f6f8fb;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        main {
+            width: 100%;
+            max-width: 400px;
+            background: #fff;
+            padding: 16px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+        }
+        h2 { margin: 0 0 12px; text-align: center; color: #333; }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 100%;
+            aspect-ratio: 1/1;
+            border: 4px solid var(--border-color);
+            box-sizing: border-box;
+        }
+        .square {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .square.light { background-color: var(--bg-light); }
+        .square.dark { background-color: var(--bg-dark); }
+        .piece {
+            width: 90%;
+            height: 90%;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+        .coord {
+            position: absolute;
+            font-size: 10px;
+            font-weight: bold;
+            pointer-events: none;
+        }
+        .coord.rank { top: 2px; left: 2px; }
+        .coord.file { bottom: 0px; right: 2px; }
+        .light .coord { color: var(--bg-dark); }
+        .dark .coord { color: var(--bg-light); }
+        
+        .status {
+            margin-top: 12px;
+            text-align: center;
+            font-weight: bold;
+            color: #555;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h2>Chess Game</h2>
+        <div id="board" class="board"></div>
+        <div id="status" class="status">Waiting for game data...</div>
+    </main>
+
+    <script type="module">
+        // Helper to parse FEN
+        function parseFen(fen) {
+            const [placement, turn] = fen.split(' ');
+            const rows = placement.split('/');
+            const board = [];
+            
+            for (let r = 0; r < 8; r++) {
+                const rowStr = rows[r];
+                const boardRow = [];
+                for (let i = 0; i < rowStr.length; i++) {
+                    const char = rowStr[i];
+                    if (isNaN(char)) {
+                        // Piece
+                        const color = char === char.toUpperCase() ? 'w' : 'b';
+                        const type = char.toLowerCase();
+                        boardRow.push({ type, color });
+                    } else {
+                        // Empty squares
+                        const count = parseInt(char);
+                        for (let k = 0; k < count; k++) boardRow.push(null);
+                    }
+                }
+                board.push(boardRow);
+            }
+            return { board, turn };
+        }
+
+        const boardEl = document.getElementById('board');
+        const statusEl = document.getElementById('status');
+        
+        // Initial State
+        let currentFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+        function render(fen) {
+            boardEl.innerHTML = '';
+            const { board, turn } = parseFen(fen);
+            
+            statusEl.textContent = \`Turn: \${turn === 'w' ? 'White' : 'Black'}\`;
+
+            board.forEach((row, r) => {
+                row.forEach((piece, c) => {
+                    const square = document.createElement('div');
+                    const isDark = (r + c) % 2 === 1;
+                    square.className = \`square \${isDark ? 'dark' : 'light'}\`;
+                    
+                    // Coordinates
+                    if (c === 0) {
+                        const coord = document.createElement('span');
+                        coord.className = 'coord rank';
+                        coord.textContent = 8 - r;
+                        square.appendChild(coord);
+                    }
+                    if (r === 7) {
+                        const coord = document.createElement('span');
+                        coord.className = 'coord file';
+                        coord.textContent = String.fromCharCode(97 + c);
+                        square.appendChild(coord);
+                    }
+
+                    if (piece) {
+                        const pieceDiv = document.createElement('div');
+                        pieceDiv.className = 'piece';
+                        // Using the same reliable CDN as the React app
+                        const imgUrl = \`https://images.chesscomfiles.com/chess-themes/pieces/neo/150/\${piece.color}\${piece.type}.png\`;
+                        pieceDiv.style.backgroundImage = \`url('\${imgUrl}')\`;
+                        square.appendChild(pieceDiv);
+                    }
+
+                    boardEl.appendChild(square);
+                });
+            });
+        }
+
+        // --- Apps SDK Integration ---
+
+        const updateState = (data) => {
+             // Look for FEN in structured content or globals
+             if (data?.fen) {
+                 currentFen = data.fen;
+                 render(currentFen);
+             } else if (data?.structuredContent?.fen) {
+                 currentFen = data.structuredContent.fen;
+                 render(currentFen);
+             }
+        };
+
+        // 1. Initial Render
+        if (window.openai?.toolOutput) {
+            updateState(window.openai.toolOutput);
+        } else {
+            render(currentFen);
+        }
+
+        // 2. Listen for globals updates (when tools are called)
+        window.addEventListener("openai:set_globals", (event) => {
+            const globals = event.detail?.globals;
+            if (globals?.toolOutput) {
+                updateState(globals.toolOutput);
+            }
+        });
+
+    </script>
+</body>
+</html>`;
 
 const server = new Server(
   {
