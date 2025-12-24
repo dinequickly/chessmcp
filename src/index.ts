@@ -617,12 +617,15 @@ function createChessServer(sessionId: string) {
     }));
 
     srv.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        console.log("MCP ReadResource:", request.params.uri);
         if (request.params.uri === "chess://board") {
             return { contents: [{ uri: "chess://board", mimeType: "text/plain", text: chess.ascii() + "\n\nFEN: " + chess.fen() }] };
         }
         if (request.params.uri === "ui://widget/chess.html") {
+            console.log("Serving embedded widget HTML");
             return { contents: [{ uri: "ui://widget/chess.html", mimeType: "text/html", text: widgetHtml }] };
         }
+        console.error("Resource not found:", request.params.uri);
         throw new McpError(ErrorCode.InvalidRequest, "Resource not found");
     });
 
