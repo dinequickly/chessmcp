@@ -53,7 +53,7 @@ const __dirname = path.dirname(__filename);
 
 // Read the widget HTML
 // Adjust path based on where built file runs. Assuming 'dist/index.js', we go up one level.
-const widgetPath = path.join(process.cwd(), 'public', 'chess-widget.html');
+const widgetPath = path.join(__dirname, '../public', 'chess-widget.html');
 let widgetHtml = "";
 try {
     widgetHtml = fs.readFileSync(widgetPath, 'utf8');
@@ -448,14 +448,23 @@ function createChessServer(sessionId: string) {
              return makeResponse(`Stockfish: ${response.data.move}`);
         }
         if (name === "new_game") {
-            // @ts-ignore
-            const op = args?.opening as string | undefined;
-            if (op && POPULAR_OPENINGS[op]) {
-                chess.load(POPULAR_OPENINGS[op]);
-                return makeResponse(`Started ${op}`);
+            try {
+                // @ts-ignore
+                const op = args?.opening as string | undefined;
+                if (op && POPULAR_OPENINGS[op]) {
+                    try {
+                        chess.load(POPULAR_OPENINGS[op]);
+                        return makeResponse(`Started ${op}`);
+                    } catch (e) {
+                         console.error(`Failed to load opening ${op}:`, e);
+                         throw new Error(`Failed to load opening ${op}`);
+                    }
+                }
+                chess.reset();
+                return makeResponse("Reset.");
+            } catch (e: any) {
+                return makeResponse(`Error starting new game: ${e.message}`, true);
             }
-            chess.reset();
-            return makeResponse("Reset.");
         }
         if (name === "list_openings") {
             return {
