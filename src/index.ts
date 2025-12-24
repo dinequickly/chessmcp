@@ -25,6 +25,21 @@ import { fileURLToPath } from 'url';
 // Global State mapped by Session ID
 const games = new Map<string, Chess>();
 
+const POPULAR_OPENINGS: Record<string, string> = {
+  "Ruy Lopez": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3",
+  "Sicilian Defense": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+  "Queen's Gambit": "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP3PPP/RNBQKBNR b KQkq - 0 2",
+  "French Defense": "rnbqkbnr/pppp1ppp/4p3/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+  "Caro-Kann Defense": "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+  "Italian Game": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3",
+  "King's Indian Defense": "rnbqkb1r/pppppp1p/5np1/8/2PP4/8/PP3PPP/RNBQKBNR w KQkq - 0 3",
+  "English Opening": "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq - 0 1",
+  "Reti Opening": "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1",
+  "Slav Defense": "rnbqkbnr/pp2pppp/2p5/3p4/2PP4/8/PP3PPP/RNBQKBNR w KQkq - 0 3",
+  "Nimzo-Indian Defense": "rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP3PPP/RNBQKB1R w KQkq - 2 4",
+  "Dutch Defense": "rnbqkbnr/ppppp1pp/8/5p2/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2"
+};
+
 function getGame(sessionId: string): Chess {
     if (!games.has(sessionId)) {
         games.set(sessionId, new Chess());
@@ -151,10 +166,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "new_game",
-        description: "Reset the chess board for a new game.",
+        description: "Reset the chess board for a new game, optionally starting with a popular opening.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+             opening: {
+                 type: "string",
+                 description: "Optional name of a popular opening (e.g., 'Sicilian Defense'). Use list_openings to see available options."
+             }
+          },
         },
         // @ts-ignore
         _meta: {
@@ -163,6 +183,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
              "openai/toolInvocation/invoked": "Board reset",
         }
       },
+      {
+          name: "list_openings",
+          description: "List available popular chess openings that can be used with new_game.",
+          inputSchema: {
+              type: "object",
+              properties: {}
+          }
+      }
     ],
   };
 });
@@ -228,8 +256,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "new_game": {
+      // @ts-ignore
+      const opening = args?.opening as string | undefined;
+      if (opening) {
+          if (POPULAR_OPENINGS[opening]) {
+              chess.load(POPULAR_OPENINGS[opening]);
+              return makeResponse(`New game started with ${opening}.`);
+          } else {
+              return makeResponse(`Opening '${opening}' not found. Available: ${Object.keys(POPULAR_OPENINGS).join(", ")}`, true);
+          }
+      }
       chess.reset();
       return makeResponse("New game started.");
+    }
+
+    case "list_openings": {
+        return {
+            content: [{ type: "text", text: `Available openings: ${Object.keys(POPULAR_OPENINGS).join(", ")}` }],
+            isError: false
+        };
     }
 
     default:
@@ -270,12 +315,19 @@ app.post("/api/tools/run", express.json(), async (req, res) => {
             chess.move(args.move);
             result = { content: `Moved ${args.move}` };
         } else if (name === "new_game") {
-            chess.reset();
-            result = { content: "Reset" };
+            if (args.opening && POPULAR_OPENINGS[args.opening]) {
+                chess.load(POPULAR_OPENINGS[args.opening]);
+                result = { content: `Started ${args.opening}` };
+            } else {
+                chess.reset();
+                result = { content: "Reset" };
+            }
         } else if (name === "get_stockfish_move") {
              const response = await axios.post("https://chess-api.com/v1", { fen: chess.fen() });
              chess.move(response.data.move);
              result = { content: `AI Moved ${response.data.move}` };
+        } else if (name === "list_openings") {
+            result = { content: Object.keys(POPULAR_OPENINGS) };
         }
         res.json(result);
     } catch (e: any) {
@@ -344,14 +396,24 @@ function createChessServer(sessionId: string) {
             },
             {
                 name: "new_game",
-                description: "Reset board.",
-                inputSchema: { type: "object", properties: {} },
+                description: "Reset board, optionally with a popular opening.",
+                inputSchema: { 
+                    type: "object", 
+                    properties: { 
+                        opening: { type: "string", description: "Name of opening (e.g. 'Ruy Lopez')" }
+                    } 
+                },
                 // @ts-ignore
                 _meta: {
                      "openai/outputTemplate": "ui://widget/chess.html",
                      "openai/toolInvocation/invoking": "Resetting...",
                      "openai/toolInvocation/invoked": "Reset",
                 }
+            },
+            {
+                name: "list_openings",
+                description: "List available openings.",
+                inputSchema: { type: "object", properties: {} }
             }
         ]
     }));
@@ -381,8 +443,20 @@ function createChessServer(sessionId: string) {
              return makeResponse(`Stockfish: ${response.data.move}`);
         }
         if (name === "new_game") {
+            // @ts-ignore
+            const op = args?.opening as string | undefined;
+            if (op && POPULAR_OPENINGS[op]) {
+                chess.load(POPULAR_OPENINGS[op]);
+                return makeResponse(`Started ${op}`);
+            }
             chess.reset();
             return makeResponse("Reset.");
+        }
+        if (name === "list_openings") {
+            return {
+                content: [{ type: "text", text: Object.keys(POPULAR_OPENINGS).join(", ") }],
+                isError: false
+            };
         }
         throw new McpError(ErrorCode.MethodNotFound, `Tool ${name} not found`);
     });
