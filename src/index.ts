@@ -365,59 +365,64 @@ function createChessServer(sessionId: string) {
         throw new McpError(ErrorCode.InvalidRequest, "Resource not found");
     });
 
-    // Register Tools
-    srv.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [
-            {
-                name: "move_piece",
-                description: "Make a move on the chess board.",
-                inputSchema: {
-                    type: "object",
-                    properties: { move: { type: "string" } },
-                    required: ["move"]
+        // Register Tools
+        srv.setRequestHandler(ListToolsRequestSchema, async () => ({
+            tools: [
+                {
+                    name: "move_piece",
+                    description: "Make a move on the chess board. Accepts SAN (e.g., 'Nf3', 'e4') or UCI (e.g., 'e2e4') notation.",
+                    inputSchema: {
+                        type: "object",
+                        properties: { move: { type: "string" } },
+                        required: ["move"]
+                    },
+                    // @ts-ignore
+                    _meta: {
+                        "openai/outputTemplate": "ui://widget/chess.html",
+                        "openai/toolInvocation/invoking": "Making move...",
+                        "openai/toolInvocation/invoked": "Move made",
+                    }
                 },
-                // @ts-ignore
-                _meta: {
-                    "openai/outputTemplate": "ui://widget/chess.html",
-                    "openai/toolInvocation/invoking": "Making move...",
-                    "openai/toolInvocation/invoked": "Move made",
-                }
-            },
-            {
-                name: "get_stockfish_move",
-                description: "Ask Stockfish to move.",
-                inputSchema: { type: "object", properties: {} },
-                // @ts-ignore
-                _meta: {
-                    "openai/outputTemplate": "ui://widget/chess.html",
-                    "openai/toolInvocation/invoking": "Thinking...",
-                    "openai/toolInvocation/invoked": "Stockfish moved",
-                }
-            },
-            {
-                name: "new_game",
-                description: "Reset board, optionally with a popular opening.",
-                inputSchema: { 
-                    type: "object", 
-                    properties: { 
-                        opening: { type: "string", description: "Name of opening (e.g. 'Ruy Lopez')" }
-                    } 
+                {
+                    name: "get_stockfish_move",
+                    description: "Ask the AI opponent (Stockfish) to make the best move.",
+                    inputSchema: { type: "object", properties: {} },
+                    // @ts-ignore
+                    _meta: {
+                        "openai/outputTemplate": "ui://widget/chess.html",
+                        "openai/toolInvocation/invoking": "Thinking...",
+                        "openai/toolInvocation/invoked": "Stockfish moved",
+                    }
                 },
-                // @ts-ignore
-                _meta: {
-                     "openai/outputTemplate": "ui://widget/chess.html",
-                     "openai/toolInvocation/invoking": "Resetting...",
-                     "openai/toolInvocation/invoked": "Reset",
+                {
+                    name: "new_game",
+                    description: "Reset the chess board for a new game, optionally starting with a popular opening.",
+                    inputSchema: { 
+                        type: "object", 
+                        properties: { 
+                            opening: { 
+                                type: "string", 
+                                description: "Optional name of a popular opening (e.g., 'Sicilian Defense'). Use list_openings to see available options."
+                            }
+                        } 
+                    },
+                    // @ts-ignore
+                    _meta: {
+                         "openai/outputTemplate": "ui://widget/chess.html",
+                         "openai/toolInvocation/invoking": "Resetting board...",
+                         "openai/toolInvocation/invoked": "Board reset",
+                    }
+                },
+                {
+                    name: "list_openings",
+                    description: "List available popular chess openings that can be used with new_game.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {}
+                    }
                 }
-            },
-            {
-                name: "list_openings",
-                description: "List available openings.",
-                inputSchema: { type: "object", properties: {} }
-            }
-        ]
-    }));
-
+            ]
+        }));
     // Register Call Tool Logic
     srv.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
