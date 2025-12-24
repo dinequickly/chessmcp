@@ -127,44 +127,6 @@ const widgetHtml = `<!DOCTYPE html>
             color: #555;
             font-size: 14px;
         }
-        
-        /* Controls */
-        .controls {
-            margin-top: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            border-top: 1px solid #eee;
-            padding-top: 16px;
-        }
-        select {
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #ddd;
-            width: 100%;
-            font-size: 14px;
-            background: #f9f9f9;
-        }
-        .buttons {
-            display: flex;
-            gap: 8px;
-        }
-        button {
-            flex: 1;
-            padding: 12px;
-            background: #779556;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-        button:hover { background: #5d7542; }
-        button.secondary { background: #4b4847; }
-        button.secondary:hover { background: #363433; }
-        button:active { transform: translateY(1px); }
     </style>
 </head>
 <body>
@@ -172,28 +134,6 @@ const widgetHtml = `<!DOCTYPE html>
         <h2>Chess Game</h2>
         <div id="board" class="board"></div>
         <div id="status" class="status">Waiting for game data...</div>
-        
-        <div class="controls">
-            <select id="opening-select">
-                <option value="">Standard Game</option>
-                <option value="Ruy Lopez">Ruy Lopez</option>
-                <option value="Sicilian Defense">Sicilian Defense</option>
-                <option value="Queen's Gambit">Queen's Gambit</option>
-                <option value="French Defense">French Defense</option>
-                <option value="Caro-Kann Defense">Caro-Kann Defense</option>
-                <option value="Italian Game">Italian Game</option>
-                <option value="King's Indian Defense">King's Indian Defense</option>
-                <option value="English Opening">English Opening</option>
-                <option value="Reti Opening">Reti Opening</option>
-                <option value="Slav Defense">Slav Defense</option>
-                <option value="Nimzo-Indian Defense">Nimzo-Indian Defense</option>
-                <option value="Dutch Defense">Dutch Defense</option>
-            </select>
-            <div class="buttons">
-                <button id="btn-start">Start Game</button>
-                <button id="btn-black" class="secondary">Play as Black</button>
-            </div>
-        </div>
     </main>
 
     <script type="module">
@@ -295,27 +235,6 @@ const widgetHtml = `<!DOCTYPE html>
             const globals = event.detail?.globals;
             if (globals?.toolOutput) {
                 updateState(globals.toolOutput);
-            }
-        });
-
-        // 3. UI Controls
-        const getOpening = () => {
-            const val = document.getElementById('opening-select').value;
-            return val ? { opening: val } : {};
-        };
-
-        document.getElementById('btn-start').addEventListener('click', async () => {
-            if (window.openai?.callTool) {
-                // Just reset/start game
-                await window.openai.callTool('new_game', getOpening());
-            }
-        });
-
-        document.getElementById('btn-black').addEventListener('click', async () => {
-            if (window.openai?.callTool) {
-                // Reset/start game THEN ask Stockfish to move (making it White's move)
-                await window.openai.callTool('new_game', getOpening());
-                await window.openai.callTool('get_stockfish_move', {});
             }
         });
 
