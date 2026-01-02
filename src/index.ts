@@ -798,7 +798,7 @@ app.get("/sse", async (req, res) => {
   });
 });
 
-app.post("/messages", express.json(), async (req, res) => { // Apply express.json() here
+app.post("/messages", async (req, res) => { // Do NOT apply express.json() here for MCP SDK
   if (!sseTransport) {
       res.status(400).send("No active transport");
       return;
