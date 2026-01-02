@@ -108,7 +108,7 @@ const widgetHtml = `<!DOCTYPE html>
     <style>body { margin: 0; height: 100%; overflow: hidden; }</style>
 </head>
 <body>
-    <iframe src="/" style="width: 100%; height: 100%; border: none;"></iframe>
+    <iframe src="https://chessmcp-production.up.railway.app/" style="width: 100%; height: 100%; border: none;"></iframe>
 </body>
 </html>`;
 
