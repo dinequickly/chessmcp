@@ -301,14 +301,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const makeResponse = (text: string, isError = false) => {
       return {
           content: [{ type: "text", text: text }],
-          isError,
-          // Extra data for the widget
-          // @ts-ignore
-          structuredContent: {
-              fen: chess.fen(),
-              ascii: chess.ascii(),
-              lastMove: text
-          }
+          isError
       };
   };
 
