@@ -447,10 +447,23 @@ app.use(cors({
 
 // Serve Static Web App
 const webDistPath = path.join(__dirname, '../web/out');
+console.log("DEBUG: Resolved webDistPath:", webDistPath);
+
 if (fs.existsSync(webDistPath)) {
+    console.log("DEBUG: Web build directory found.");
+    try {
+        const files = fs.readdirSync(webDistPath);
+        console.log("DEBUG: Files in web build:", files.slice(0, 5));
+    } catch (e) {
+        console.error("DEBUG: Error reading web dir:", e);
+    }
     app.use(express.static(webDistPath));
 } else {
-    // console.warn("Web build not found at:", webDistPath);
+    console.warn("DEBUG: Web build NOT found at:", webDistPath);
+    console.log("DEBUG: Current __dirname:", __dirname);
+    try {
+        console.log("DEBUG: Parent dir content:", fs.readdirSync(path.join(__dirname, '..')));
+    } catch (e) {}
 }
 
 // DO NOT use global express.json() as it consumes streams for MCP transports
@@ -804,6 +817,7 @@ if (process.argv.includes("--stdio")) {
     await server.connect(transport);
 } else {
     const port = process.env.PORT || 3000;
+    console.log(`DEBUG: Starting server on port ${port}...`);
     app.listen(Number(port), "0.0.0.0", () => {
       console.log(`Chess MCP Server listening on port ${port}`);
       console.log(`OpenAI Endpoint: http://localhost:${port}/mcp`);
