@@ -17,19 +17,23 @@ def main():
     model_id = "NAKSTStudio/chess-gemma-commentary"
     
     try:
-        # Determine device
-        device = "cpu"
+        # Determine device/dtype. MPS + fp16 can produce NaNs during sampling.
         if torch.cuda.is_available():
             device = "cuda"
+            dtype = torch.float16
         elif torch.backends.mps.is_available():
             device = "mps"
-            
-        print(f"Loading model on {device}...", file=sys.stderr)
+            dtype = torch.float32
+        else:
+            device = "cpu"
+            dtype = torch.float32
+
+        print(f"Loading model on {device} ({dtype})...", file=sys.stderr)
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype=torch.float16 if device != "cpu" else torch.float32,
+            dtype=dtype,
         ).to(device)
 
         messages = [
@@ -54,12 +58,27 @@ CP: {args.cp}'''
 
         inputs = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True).to(device)
         
-        outputs = model.generate(
-            inputs, 
-            max_new_tokens=256, 
-            temperature=0.7,
-            do_sample=True
-        )
+        try:
+            outputs = model.generate(
+                inputs,
+                max_new_tokens=256,
+                temperature=0.7,
+                do_sample=True
+            )
+        except RuntimeError as e:
+            if device == "mps" and "probability tensor contains" in str(e):
+                print("MPS generation failed; retrying on CPU.", file=sys.stderr)
+                device = "cpu"
+                model = model.to(device)
+                inputs = inputs.to(device)
+                outputs = model.generate(
+                    inputs,
+                    max_new_tokens=256,
+                    temperature=0.7,
+                    do_sample=True
+                )
+            else:
+                raise
         
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         
