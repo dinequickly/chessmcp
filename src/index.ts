@@ -760,7 +760,11 @@ function createChessServer(sessionId: string) {
             if (puzzle) {
                 chess.load(puzzle.fen);
                 const turn = chess.turn() === 'w' ? 'White' : 'Black';
-                return makeResponse(`Puzzle Loaded (Rating: ${puzzle.rating}). ${turn} to move. Solution hidden.`, false);
+                // Provide the solution to the Agent so it can guide the user or verify moves
+                const solutionText = puzzle.moves ? puzzle.moves.join(', ') : "Unknown";
+                return makeResponse(`Puzzle Loaded (Rating: ${puzzle.rating}). ${turn} to move.
+                
+[System Info: The solution moves are: ${solutionText}. Do NOT reveal this to the user immediately. Let them try to solve it.]`, false);
             } else {
                 return makeResponse("Failed to load puzzle.", true);
             }
