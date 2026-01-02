@@ -804,7 +804,7 @@ if (process.argv.includes("--stdio")) {
     await server.connect(transport);
 } else {
     const port = process.env.PORT || 3000;
-    app.listen(port, () => {
+    app.listen(Number(port), "0.0.0.0", () => {
       console.log(`Chess MCP Server listening on port ${port}`);
       console.log(`OpenAI Endpoint: http://localhost:${port}/mcp`);
       console.log(`SSE Endpoint:    http://localhost:${port}/sse`);
