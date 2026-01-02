@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AppsSDKUIProvider } from "@openai/apps-sdk-ui/components/AppsSDKUIProvider";
-import Link from "next/link";
+import ClientLayout from "./ClientLayout";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,7 +20,7 @@ export const metadata: Metadata = {
 
 declare global {
   interface AppsSDKUIConfig {
-    LinkComponent: typeof Link;
+    LinkComponent: typeof import("next/link").default;
   }
 }
 
@@ -35,9 +34,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppsSDKUIProvider linkComponent={Link}>
+        <ClientLayout>
           {children}
-        </AppsSDKUIProvider>
+        </ClientLayout>
       </body>
     </html>
   );
