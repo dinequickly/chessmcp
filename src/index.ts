@@ -1,5 +1,6 @@
 import express from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -680,7 +681,8 @@ app.post("/mcp", async (req, res) => {
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
     
     // Extract Session ID from Headers (or default)
-    const sessionId = (req.headers["mcp-session-id"] as string) || "default";
+    // FORCE "default" so the Agent and the Web UI share the same board
+    const sessionId = "default"; 
 
     // Create Fresh Server & Transport per Request (Stateless Pattern)
     const serverInstance = createChessServer(sessionId);
@@ -737,6 +739,10 @@ app.post("/messages", express.json(), async (req, res) => { // Apply express.jso
   }
 });
 
+if (process.argv.includes("--stdio")) {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+}
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
