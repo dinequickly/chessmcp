@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.DS_Store
+.env
+npm-debug.log
+yarn-error.log
+
+# Web specific ignores
+web/node_modules
+web/.next
+web/out
+web/.DS_Store
