@@ -20,6 +20,7 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { PUZZLES } from './puzzles.js';
 
 const execAsync = promisify(exec);
 
@@ -49,7 +50,7 @@ function getGame(sessionId: string): Chess {
     if (!games.has(sessionId)) {
         games.set(sessionId, new Chess());
     }
-    return games.get(sessionId)!;
+    return games.get(sessionId)!
 }
 
 async function getPlayerStats(username: string): Promise<string> {
@@ -256,6 +257,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_puzzle",
+        description: "Get a chess puzzle to solve. Can specify a target rating.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            rating: {
+              type: "number",
+              description: "Target Elo rating for the puzzle (e.g., 1200, 2000). If omitted, gets the Daily Puzzle or a random one."
+            }
+          }
+        },
+        // @ts-ignore
+        _meta: {
+            "openai/outputTemplate": "ui://widget/chess.html",
+            "openai/toolInvocation/invoking": "Loading puzzle...",
+            "openai/toolInvocation/invoked": "Puzzle loaded",
+        }
+      },
+      {
         name: "analyze_last_move",
         description: "Analyze the last move played on the board using the NAKSTStudio/chess-gemma-commentary model.",
         inputSchema: {
@@ -362,6 +382,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const stats = await getPlayerStats(parsed.data.username);
       return makeResponse(stats);
+    }
+
+    case "get_puzzle": {
+      // @ts-ignore
+      const targetRating = args?.rating as number | undefined;
+      let puzzle;
+
+      if (targetRating) {
+          // Find closest puzzle in local DB
+          puzzle = PUZZLES.reduce((prev, curr) => {
+              return (Math.abs(curr.rating - targetRating) < Math.abs(prev.rating - targetRating) ? curr : prev);
+          });
+      } else {
+          // Default to random local puzzle for simplicity and reliability
+          puzzle = PUZZLES[Math.floor(Math.random() * PUZZLES.length)];
+      }
+      
+      if (puzzle) {
+           chess.load(puzzle.fen);
+           const turn = chess.turn() === 'w' ? 'White' : 'Black';
+           return makeResponse(`Puzzle Loaded (Rating: ${puzzle.rating}). ${turn} to move. Solution hidden.`, false);
+      } else {
+           return makeResponse("Failed to load puzzle.", true);
+      }
     }
 
     case "analyze_last_move": {
@@ -505,6 +549,20 @@ app.post("/api/tools/run", express.json(), async (req, res) => {
         } else if (name === "get_player_stats") {
             const stats = await getPlayerStats(args.username);
             result = { content: stats };
+        } else if (name === "get_puzzle") {
+             const targetRating = args?.rating;
+             let puzzle;
+             if (targetRating) {
+                 puzzle = PUZZLES.reduce((prev, curr) => (Math.abs(curr.rating - targetRating) < Math.abs(prev.rating - targetRating) ? curr : prev));
+             } else {
+                 puzzle = PUZZLES[Math.floor(Math.random() * PUZZLES.length)];
+             }
+             if (puzzle) {
+                 chess.load(puzzle.fen);
+                 result = { content: `Puzzle Loaded (Rating: ${puzzle.rating})` };
+             } else {
+                 result = { error: "Failed to load puzzle" };
+             }
         }
         res.json(result);
     } catch (e: any) {
@@ -613,6 +671,22 @@ function createChessServer(sessionId: string) {
                     }
                 },
                 {
+                    name: "get_puzzle",
+                    description: "Get a chess puzzle to solve. Can specify a target rating.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            rating: { type: "number", description: "Target Elo rating for the puzzle (e.g., 1200, 2000). If omitted, gets the Daily Puzzle or a random one." }
+                        }
+                    },
+                    // @ts-ignore
+                    _meta: {
+                        "openai/outputTemplate": "ui://widget/chess.html",
+                        "openai/toolInvocation/invoking": "Loading puzzle...",
+                        "openai/toolInvocation/invoked": "Puzzle loaded",
+                    }
+                },
+                {
                     name: "analyze_last_move",
                     description: "Analyze the last move played on the board using the NAKSTStudio/chess-gemma-commentary model.",
                     inputSchema: { type: "object", properties: {} },
@@ -680,6 +754,23 @@ function createChessServer(sessionId: string) {
             if (!username) return makeResponse("Username is required", true);
             const stats = await getPlayerStats(username);
             return makeResponse(stats);
+        }
+        if (name === "get_puzzle") {
+            // @ts-ignore
+            const targetRating = args?.rating as number | undefined;
+            let puzzle;
+            if (targetRating) {
+                puzzle = PUZZLES.reduce((prev, curr) => (Math.abs(curr.rating - targetRating) < Math.abs(prev.rating - targetRating) ? curr : prev));
+            } else {
+                puzzle = PUZZLES[Math.floor(Math.random() * PUZZLES.length)];
+            }
+            if (puzzle) {
+                chess.load(puzzle.fen);
+                const turn = chess.turn() === 'w' ? 'White' : 'Black';
+                return makeResponse(`Puzzle Loaded (Rating: ${puzzle.rating}). ${turn} to move. Solution hidden.`, false);
+            } else {
+                return makeResponse("Failed to load puzzle.", true);
+            }
         }
         if (name === "analyze_last_move") {
             const history = chess.history({ verbose: true });
