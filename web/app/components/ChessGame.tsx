@@ -1,12 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Chessboard } from "react-chessboard";
+import dynamic from 'next/dynamic';
 import { Badge } from "@openai/apps-sdk-ui/components/Badge";
 import { Button } from "@openai/apps-sdk-ui/components/Button";
 import { Input } from "@openai/apps-sdk-ui/components/Input";
 import { RefreshCw, Link as LinkIcon, Send, User, Bot, MessageSquare } from "lucide-react";
 import { clsx } from "clsx";
+
+// Dynamically import Chessboard with SSR disabled to prevent build hangs
+const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Chessboard), { 
+  ssr: false,
+  loading: () => <div className="w-full h-full bg-neutral-100 animate-pulse flex items-center justify-center text-xs text-secondary">Loading Board...</div>
+});
 
 interface Message {
   id: string;
@@ -102,7 +108,6 @@ export default function ChessGame() {
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("application/json")) {
          const data = await response.json();
-         // Prioritize 'output', then 'message', then 'text'
          responseText = data.output || data.message || data.text || JSON.stringify(data);
       } else {
          responseText = await response.text();
@@ -182,6 +187,7 @@ export default function ChessGame() {
              <MessageSquare className="text-primary" size={20} />
              <h3 className="heading-md">Agent Chat</h3>
            </div>
+           {/* Removed the refresh button from here to match previous request */}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-surface-subtle/30">

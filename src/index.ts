@@ -18,6 +18,10 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 /**
  * MCP Server for playing Chess via HTTP/SSE and OpenAI Apps SDK.
@@ -46,6 +50,49 @@ function getGame(sessionId: string): Chess {
         games.set(sessionId, new Chess());
     }
     return games.get(sessionId)!;
+}
+
+async function getPlayerStats(username: string): Promise<string> {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+
+    try {
+        const url = `https://api.chess.com/pub/player/${username}/games/${year}/${month}`;
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; ChessMcpServer/1.0)'
+            }
+        });
+
+        const games = response.data.games;
+        if (!games || games.length === 0) {
+            return `No games found for ${username} in ${year}/${month}.`;
+        }
+
+        let wins = 0;
+        let losses = 0;
+        let draws = 0;
+
+        games.forEach((game: any) => {
+            const isWhite = game.white.username.toLowerCase() === username.toLowerCase();
+            const player = isWhite ? game.white : game.black;
+            const result = player.result;
+
+            if (result === 'win') {
+                wins++;
+            } else if (['checkmated', 'resigned', 'timeout', 'abandoned', 'kingofthehill', 'threecheck', 'timevsinsufficient', 'busted'].includes(result)) {
+                losses++;
+            } else {
+                draws++;
+            }
+        });
+
+        return `Recent games for ${username} (${year}/${month}):\n- Total Games: ${games.length}\n- Wins: ${wins}\n- Losses: ${losses}\n- Draws: ${draws}`;
+
+    } catch (error: any) {
+        return `Error fetching games for ${username}: ${error.message}`;
+    }
 }
 
 // Helper to get current directory in ESM
@@ -193,6 +240,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "object",
               properties: {}
           }
+      },
+      {
+        name: "get_player_stats",
+        description: "Get a breakdown of recent games for a Chess.com user.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            username: {
+              type: "string",
+              description: "The Chess.com username."
+            }
+          },
+          required: ["username"]
+        }
+      },
+      {
+        name: "analyze_last_move",
+        description: "Analyze the last move played on the board using the NAKSTStudio/chess-gemma-commentary model.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        },
+        // @ts-ignore
+        _meta: {
+            "openai/outputTemplate": "ui://widget/chess.html",
+            "openai/toolInvocation/invoking": "Analyzing move...",
+            "openai/toolInvocation/invoked": "Analysis complete",
+        }
       }
     ],
   };
@@ -280,6 +355,81 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 
+    case "get_player_stats": {
+      const schema = z.object({ username: z.string() });
+      const parsed = schema.safeParse(args);
+      if (!parsed.success) throw new McpError(ErrorCode.InvalidParams, "Invalid arguments");
+
+      const stats = await getPlayerStats(parsed.data.username);
+      return makeResponse(stats);
+    }
+
+    case "analyze_last_move": {
+        const history = chess.history({ verbose: true });
+        if (history.length === 0) {
+            return makeResponse("No moves have been made yet to analyze.", true);
+        }
+        const lastMove = history[history.length - 1];
+
+        try {
+             // 1. Get evaluation for current position (After move)
+            const fenAfter = chess.fen();
+            const evalAfterRes = await axios.post("https://chess-api.com/v1", { fen: fenAfter, depth: 10 });
+            // Handle mate or int
+            const evalAfterVal = typeof evalAfterRes.data.eval === 'number' ? evalAfterRes.data.eval : 0; 
+
+            // 2. Get evaluation for position BEFORE move
+            chess.undo();
+            const fenBefore = chess.fen();
+            const evalBeforeRes = await axios.post("https://chess-api.com/v1", { fen: fenBefore, depth: 10 });
+            const evalBeforeVal = typeof evalBeforeRes.data.eval === 'number' ? evalBeforeRes.data.eval : 0;
+            const bestMoveBefore = evalBeforeRes.data.move || "unknown";
+            
+            // Replay the move
+            chess.move(lastMove.san);
+
+            // 3. Calculate metrics
+            const cpBefore = Math.round(evalBeforeVal * 100);
+            const cpAfter = Math.round(evalAfterVal * 100);
+            const delta = cpAfter - cpBefore;
+            const cpString = `${cpBefore}->${cpAfter} (D=${delta})`;
+
+            // Tag Logic
+            let tag = "Good";
+            if (lastMove.san === bestMoveBefore || (lastMove.lan && lastMove.lan === bestMoveBefore)) {
+                tag = "Best";
+            } else {
+                 // Simple heuristic
+                 const diff = Math.abs(delta);
+                 if (diff > 50) tag = "Inaccuracy";
+                 if (diff > 150) tag = "Mistake";
+                 if (diff > 300) tag = "Blunder";
+            }
+            
+            // 4. Call Python Script
+            // We assume the script is in ../scripts from dist/, or we try to locate it relative to project root.
+            // __dirname in src/index.ts (if running via ts-node) is src/. If compiled to dist/, it is dist/.
+            // Safe bet: resolve from process.cwd() if possible, or relative.
+            // Let's assume process.cwd() is project root.
+            const scriptPath = path.resolve(process.cwd(), "scripts/chess_commentary.py");
+            const venvPython = path.resolve(process.cwd(), "scripts/.venv/bin/python");
+            
+            // Fallback to system python if venv not found (though we created it)
+            const pythonExec = fs.existsSync(venvPython) ? venvPython : "python3";
+            
+            const cmd = `"${pythonExec}" "${scriptPath}" --fen "${fenBefore}" --move "${lastMove.san}" --side "${lastMove.color === 'w' ? 'White' : 'Black'}" --tag "${tag}" --best_alt "${bestMoveBefore}" --cp "${cpString}"`;
+            
+            // console.log("Running analysis:", cmd);
+            const { stdout, stderr } = await execAsync(cmd);
+            if (stderr && !stdout) console.error("Python Stderr:", stderr); // Only log if no stdout, or log as warning
+            
+            return makeResponse(stdout.trim());
+
+        } catch (e: any) {
+            return makeResponse(`Analysis failed: ${e.message}`, true);
+        }
+    }
+
     default:
       throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${name}`);
   }
@@ -339,6 +489,9 @@ app.post("/api/tools/run", express.json(), async (req, res) => {
              result = { content: `AI Moved ${response.data.move}` };
         } else if (name === "list_openings") {
             result = { content: Object.keys(POPULAR_OPENINGS) };
+        } else if (name === "get_player_stats") {
+            const stats = await getPlayerStats(args.username);
+            result = { content: stats };
         }
         res.json(result);
     } catch (e: any) {
@@ -434,6 +587,28 @@ function createChessServer(sessionId: string) {
                         type: "object",
                         properties: {}
                     }
+                },
+                {
+                    name: "get_player_stats",
+                    description: "Get a breakdown of recent games for a Chess.com user.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            username: { type: "string", description: "The Chess.com username." }
+                        },
+                        required: ["username"]
+                    }
+                },
+                {
+                    name: "analyze_last_move",
+                    description: "Analyze the last move played on the board using the NAKSTStudio/chess-gemma-commentary model.",
+                    inputSchema: { type: "object", properties: {} },
+                    // @ts-ignore
+                    _meta: {
+                        "openai/outputTemplate": "ui://widget/chess.html",
+                        "openai/toolInvocation/invoking": "Analyzing move...",
+                        "openai/toolInvocation/invoked": "Analysis complete",
+                    }
                 }
             ]
         }));
@@ -485,6 +660,61 @@ function createChessServer(sessionId: string) {
                 content: [{ type: "text", text: Object.keys(POPULAR_OPENINGS).join(", ") }],
                 isError: false
             };
+        }
+        if (name === "get_player_stats") {
+            // @ts-ignore
+            const username = args?.username as string;
+            if (!username) return makeResponse("Username is required", true);
+            const stats = await getPlayerStats(username);
+            return makeResponse(stats);
+        }
+        if (name === "analyze_last_move") {
+            const history = chess.history({ verbose: true });
+            if (history.length === 0) return makeResponse("No moves to analyze.", true);
+            const lastMove = history[history.length - 1];
+
+            try {
+                // 1. Eval After
+                const fenAfter = chess.fen();
+                const evalAfterRes = await axios.post("https://chess-api.com/v1", { fen: fenAfter, depth: 10 });
+                const evalAfterVal = typeof evalAfterRes.data.eval === 'number' ? evalAfterRes.data.eval : 0;
+
+                // 2. Eval Before
+                chess.undo();
+                const fenBefore = chess.fen();
+                const evalBeforeRes = await axios.post("https://chess-api.com/v1", { fen: fenBefore, depth: 10 });
+                const evalBeforeVal = typeof evalBeforeRes.data.eval === 'number' ? evalBeforeRes.data.eval : 0;
+                const bestMoveBefore = evalBeforeRes.data.move || "unknown";
+                chess.move(lastMove.san);
+
+                // 3. Metrics
+                const cpBefore = Math.round(evalBeforeVal * 100);
+                const cpAfter = Math.round(evalAfterVal * 100);
+                const delta = cpAfter - cpBefore;
+                const cpString = `${cpBefore}->${cpAfter} (D=${delta})`;
+
+                let tag = "Good";
+                if (lastMove.san === bestMoveBefore || (lastMove.lan && lastMove.lan === bestMoveBefore)) {
+                    tag = "Best";
+                } else {
+                    const diff = Math.abs(delta);
+                    if (diff > 50) tag = "Inaccuracy";
+                    if (diff > 150) tag = "Mistake";
+                    if (diff > 300) tag = "Blunder";
+                }
+
+                // 4. Python
+                const scriptPath = path.resolve(process.cwd(), "scripts/chess_commentary.py");
+                const venvPython = path.resolve(process.cwd(), "scripts/.venv/bin/python");
+                const pythonExec = fs.existsSync(venvPython) ? venvPython : "python3";
+                
+                const cmd = `"${pythonExec}" "${scriptPath}" --fen "${fenBefore}" --move "${lastMove.san}" --side "${lastMove.color === 'w' ? 'White' : 'Black'}" --tag "${tag}" --best_alt "${bestMoveBefore}" --cp "${cpString}"`;
+                
+                const { stdout } = await execAsync(cmd);
+                return makeResponse(stdout.trim());
+            } catch (e: any) {
+                return makeResponse(`Analysis failed: ${e.message}`, true);
+            }
         }
         throw new McpError(ErrorCode.MethodNotFound, `Tool ${name} not found`);
     });
@@ -572,11 +802,11 @@ app.post("/messages", express.json(), async (req, res) => { // Apply express.jso
 if (process.argv.includes("--stdio")) {
     const transport = new StdioServerTransport();
     await server.connect(transport);
+} else {
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+      console.log(`Chess MCP Server listening on port ${port}`);
+      console.log(`OpenAI Endpoint: http://localhost:${port}/mcp`);
+      console.log(`SSE Endpoint:    http://localhost:${port}/sse`);
+    });
 }
-
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Chess MCP Server listening on port ${port}`);
-  console.log(`OpenAI Endpoint: http://localhost:${port}/mcp`);
-  console.log(`SSE Endpoint:    http://localhost:${port}/sse`);
-});
