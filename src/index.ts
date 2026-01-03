@@ -83,7 +83,23 @@ function createChessServer(sessionId: string) {
 
     srv.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         if (request.params.uri === "chess://board") return { contents: [{ uri: "chess://board", mimeType: "text/plain", text: chess.fen() }] };
-        if (request.params.uri === "ui://widget/chess.html") return { contents: [{ uri: "ui://widget/chess.html", mimeType: "text/html", text: widgetHtml }] };
+        if (request.params.uri === "ui://widget/chess.html") return { 
+            contents: [{ 
+                uri: "ui://widget/chess.html", 
+                mimeType: "text/html", 
+                text: widgetHtml,
+                // @ts-ignore
+                _meta: {
+                    "openai/widgetPrefersBorder": true,
+                    "openai/widgetDomain": "https://chessmcp-production.up.railway.app",
+                    "openai/widgetCSP": {
+                        "frame_domains": ["https://chessmcp-production.up.railway.app"],
+                        "connect_domains": ["https://chessmcp-production.up.railway.app"],
+                        "resource_domains": ["https://chessmcp-production.up.railway.app"]
+                    }
+                }
+            }] 
+        };
         throw new McpError(ErrorCode.InvalidRequest, "Resource not found");
     });
 
